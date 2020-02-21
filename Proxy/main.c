@@ -9,7 +9,7 @@
 #include <sys/select.h>
 
 int multiplier  = 3;
-int server_size = 27*(1 << 13)
+int server_size = 27*(1 << 13);
 
 
 void err_sys(const char* error);
@@ -55,16 +55,16 @@ int main(int argc, char* argv[])
 
 	for(int i = 1; i < n-1; i++)
 	{
-		pipe(client_structs[i].fds[0]);
-		pipe(client_structs[i].fds[2]);
+		pipe(&client_structs[i].fds[0]);
+		pipe(&client_structs[i].fds[2]);
 		fcntl(client_structs[i].fds[3], F_SETFL, O_WRONLY|O_NONBLOCK);
 	}
 
-	for (int i = 0; i < N; i++)
+	for (int i = 0; i < n; i++)
 	{
 		if(fork == 0)
 		{
-			for (int j = 0; j < N; j++)
+			for (int j = 0; j < n; j++)
 			{
 				if(i != j)
 				{
@@ -79,6 +79,7 @@ int main(int argc, char* argv[])
 					close(client_structs[j].fds[3]);
 				}
 			}
+
 		}
 	}
 
@@ -87,5 +88,5 @@ int main(int argc, char* argv[])
 void err_sys(const char* error)
 {
 	perror(error);
-}
 	exit(1);
+}
