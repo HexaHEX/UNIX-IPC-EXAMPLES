@@ -8,8 +8,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
 
-int multiplier  = 3;
-int server_size = 27*(1 << 13);
+#define BUFFSIZE 27*(1 << 10)
 
 
 void err_sys(const char* error);
@@ -79,10 +78,29 @@ int main(int argc, char* argv[])
 					close(client_structs[j].fds[3]);
 				}
 			}
+			int out = client_structs[i].fds[1];
+			int in  = client_structs[i].fds[2];
+			free(client_structs);
+
+			char data[BUFFSIZE] = "";
+			int ret = 1;
+			while(ret)
+			{
+				ret = read(in, data, BUFFSIZE);
+				if(ret < 0)
+					err_sys("READ ERROR");
+				if(write(out, data, ret) < ret)
+					err_sys("WRITE ERROR");
+			}
+			close(in);
+			close(out);
+			exit(0);
+		}
+		else
+		{
 
 		}
 	}
-
 }
 
 void err_sys(const char* error)
