@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
 	for(int i = n-1; i > 0; i--)
 	{
 		client_structs[i].capacity = mul * 1 << 9;
-		client_structs[i].freedata = (char*)calloc(capacity, sizeof(char));
+		client_structs[i].freedata = (char*)calloc(client_structs[i].capacity, sizeof(char));
 		client_structs[i].data = client_structs[i].freedata;
 		client_structs[i].size = 0;
 
@@ -119,7 +119,7 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	while (true)
+	while (1)
 	{
 		fd_set readable;
 		fd_set writeable;
@@ -151,7 +151,7 @@ int main(int argc, char* argv[])
 
 		if(fds == 0)
 			break;
-		int seletret = select(maxfd + 1, &readable, &writeable, NULL, NULL);
+		int selectret = select(maxfd + 1, &readable, &writeable, NULL, NULL);
 
 		if(selectret == 0)
 			break;
@@ -189,9 +189,8 @@ int main(int argc, char* argv[])
 		}
 	}
 	for(int i = 1; i < n; i++)
-	{
-		free(client_structs[i].data);_
-	}
+		free(client_structs[i].data);
+		
 	free(client_structs);
 	exit(0);
 }
