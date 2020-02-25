@@ -8,7 +8,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
 
-#define BUFFSIZE 27*(1 << 10)
+#define BUFFSIZE 27*(1 << 15)
 
 
 void err_sys(const char* error);
@@ -27,7 +27,7 @@ typedef struct client
 
 int main(int argc, char* argv[])
 {
-	int n = 2;
+	int n = 1;
 	int input_fd = 0;
 
 	client* client_structs = NULL;
@@ -38,31 +38,42 @@ int main(int argc, char* argv[])
 	}
 
 	n += atoi(argv[2]);
+	if(n == 1)
+		err_sys("INCORRECT INPUT");
 	client_structs = (client*)calloc(n, sizeof(client));
 
 	input_fd = open(argv[1], O_RDONLY);
+	/*
 	client_structs[0].fds1[0] = -1;
 	client_structs[0].fds1[1] = -1;
 	client_structs[0].fds2[0] = input_fd;
 	client_structs[0].fds2[1] = -1;
-
+*/
 	client_structs[n-1].fds1[0] = -1;
 	client_structs[n-1].fds1[1] =  1;
 	client_structs[n-1].fds2[0] = -1;
 	client_structs[n-1].fds2[1] = -1;
+
+	pipe(client_structs[0].fds2);
+	client_structs[0].fds1[0] = input_fd;
+	client_structs[0].fds1[1] = -1;
+	fcntl(client_structs[0].fds2[0], F_SETFL, O_RDONLY|O_NONBLOCK);
+
 
 	for(int i = 1; i < n-1; i++)
 	{
 
 		pipe(client_structs[i].fds1);
 		pipe(client_structs[i].fds2);
+
 		fcntl(client_structs[i].fds1[1], F_SETFL, O_WRONLY|O_NONBLOCK);
+		fcntl(client_structs[i].fds2[0], F_SETFL, O_RDONLY|O_NONBLOCK);
 	}
-	for (int i = 1; i < n-1; i++)
+	for (int i = 0; i < n-1; i++)
 	{
 		if(fork() == 0)
 		{
-			for (int j = 1; j < n-1; j++)
+			for (int j = 0; j < n-1; j++)
 			{
 				if(i != j)
 				{
@@ -94,7 +105,7 @@ int main(int argc, char* argv[])
 			exit(0);
 		}
 	}
-	for(int i = 1; i < n-1; i++)
+	for(int i = 0; i < n-1; i++)
 	{
 		close(client_structs[i].fds1[0]);
 		close(client_structs[i].fds2[1]);
@@ -103,9 +114,9 @@ int main(int argc, char* argv[])
 	int mul = 1;
 	int maxfd = -1;
 
-	for(int i = n-1; i > 0; i--)
+	for(int i = n-1; i > -1; i--)
 	{
-		client_structs[i].capacity = mul * 1 << 10;
+		client_structs[i].capacity = mul * 1 << 15;
 		client_structs[i].freedata = (char*)calloc(client_structs[i].capacity, sizeof(char));
 		client_structs[i].data = client_structs[i].freedata;
 		client_structs[i].size = 0;
@@ -183,7 +194,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	for(int i = 1; i < n; i++)
+	for(int i = 0; i < n; i++)
 		free(client_structs[i].data);
 
 	free(client_structs);
