@@ -8,14 +8,15 @@
 #include <sys/types.h>
 #include <sys/select.h>
 
-#define BUFFSIZE 27*(1 << 9)
+#define BUFFSIZE 27*(1 << 10)
 
 
 void err_sys(const char* error);
 
 typedef struct client
 {
-	int fds[4];
+	int fds1[2];
+	int fds2[2];
 	char* data;
 	char* freedata;
 	int capacity;
@@ -37,51 +38,48 @@ int main(int argc, char* argv[])
 	}
 
 	n += atoi(argv[2]);
-
 	client_structs = (client*)calloc(n, sizeof(client));
 
 	input_fd = open(argv[1], O_RDONLY);
+	client_structs[0].fds1[0] = -1;
+	client_structs[0].fds1[1] = -1;
+	client_structs[0].fds2[0] = input_fd;
+	client_structs[0].fds2[1] = -1;
 
-	client_structs[0].fds[0] = -1;
-	client_structs[0].fds[1] = -1;
-	client_structs[0].fds[2] = input_fd;
-	client_structs[0].fds[3] = -1;
-
-	client_structs[n-1].fds[0] = -1;
-	client_structs[n-1].fds[1] =  1;
-	client_structs[n-1].fds[2] = -1;
-	client_structs[n-1].fds[3] = -1;
+	client_structs[n-1].fds1[0] = -1;
+	client_structs[n-1].fds1[1] =  1;
+	client_structs[n-1].fds2[0] = -1;
+	client_structs[n-1].fds2[1] = -1;
 
 	for(int i = 1; i < n-1; i++)
 	{
-		pipe(&client_structs[i].fds[0]);
-		pipe(&client_structs[i].fds[2]);
-		fcntl(client_structs[i].fds[3], F_SETFL, O_WRONLY|O_NONBLOCK);
-	}
 
+		pipe(client_structs[i].fds1);
+		pipe(client_structs[i].fds2);
+		fcntl(client_structs[i].fds1[1], F_SETFL, O_WRONLY|O_NONBLOCK);
+	}
 	for (int i = 1; i < n-1; i++)
 	{
-		if(fork == 0)
+		if(fork() == 0)
 		{
 			for (int j = 1; j < n-1; j++)
 			{
 				if(i != j)
 				{
-					close(client_structs[j].fds[0]);
-					close(client_structs[j].fds[1]);
-					close(client_structs[j].fds[2]);
-					close(client_structs[j].fds[3]);
+					close(client_structs[j].fds1[0]);
+					close(client_structs[j].fds1[1]);
+					close(client_structs[j].fds2[0]);
+					close(client_structs[j].fds2[1]);
 				}
 				else
 				{
-					close(client_structs[j].fds[0]);
-					close(client_structs[j].fds[3]);
+					close(client_structs[j].fds1[1]);
+					close(client_structs[j].fds2[0]);
 				}
 			}
-			int out = client_structs[i].fds[1];
-			int in  = client_structs[i].fds[2];
+			int in = client_structs[i].fds1[0];
+			int out  = client_structs[i].fds2[1];
 			free(client_structs);
-
 			char data[BUFFSIZE] = "";
 			int ret = 1;
 			while(ret)
@@ -90,8 +88,7 @@ int main(int argc, char* argv[])
 				if(ret < 0)
 					err_sys("READ ERROR");
 				if(write(out, data, ret) < ret)
-					err_sys("WRITE ERROR");
-			}
+					err_sys("WRITE ERROR");			}
 			close(in);
 			close(out);
 			exit(0);
@@ -99,8 +96,8 @@ int main(int argc, char* argv[])
 	}
 	for(int i = 1; i < n-1; i++)
 	{
-		close(client_structs[i].fds[0]);
-		close(client_structs[i].fds[3]);
+		close(client_structs[i].fds1[0]);
+		close(client_structs[i].fds2[1]);
 	}
 
 	int mul = 1;
@@ -108,11 +105,10 @@ int main(int argc, char* argv[])
 
 	for(int i = n-1; i > 0; i--)
 	{
-		client_structs[i].capacity = mul * 1 << 9;
+		client_structs[i].capacity = mul * 1 << 10;
 		client_structs[i].freedata = (char*)calloc(client_structs[i].capacity, sizeof(char));
 		client_structs[i].data = client_structs[i].freedata;
 		client_structs[i].size = 0;
-
 		if(mul <= 27)
 		{
 			mul *= 3;
@@ -130,21 +126,21 @@ int main(int argc, char* argv[])
 
 		for(int i = 0; i < n; i++)
 		{
-			if(client_structs[i].fds[1] > maxfd)
-				maxfd = client_structs[i].fds[1];
+			if(client_structs[i].fds1[1] > maxfd)
+				maxfd = client_structs[i].fds1[1];
 
-			if(client_structs[i].fds[2] > maxfd)
-				maxfd = client_structs[i].fds[2];
+			if(client_structs[i].fds2[0] > maxfd)
+				maxfd = client_structs[i].fds2[0];
 
-			if((client_structs[i].fds[2] != -1) && (client_structs[i+1].size == 0))
+			if((client_structs[i].fds2[0] != -1) && (client_structs[i+1].size == 0))
 			{
-				FD_SET(client_structs[i].fds[2], &readable);
+				FD_SET(client_structs[i].fds2[0], &readable);
 				fds++;
 			}
 
-			if((client_structs[i].fds[1] != -1) && (client_structs[i].size != 0))
+			if((client_structs[i].fds1[1] != -1) && (client_structs[i].size != 0))
 			{
-				FD_SET(client_structs[i].fds[1], &writeable);
+				FD_SET(client_structs[i].fds1[1], &writeable);
 				fds++;
 			}
 		}
@@ -160,23 +156,23 @@ int main(int argc, char* argv[])
 
 		for(int i = 0; i < n; i++)
 		{
-			if(FD_ISSET(client_structs[i].fds[2], &readable))
+			if(FD_ISSET(client_structs[i].fds2[0], &readable))
 			{
-				int readret = read(client_structs[i].fds[2], client_structs[i+1].data, client_structs[i+1].capacity);
-
+				int readret = read(client_structs[i].fds2[0], client_structs[i+1].data, client_structs[i+1].capacity);
 				if(readret == -1)
 					err_sys("READ ERROR");
+				client_structs[i+1].size += readret;
 				if(readret == 0)
 				{
-					close(client_structs[i].fds[2]);
-					close(client_structs[i+1].fds[1]);
-					client_structs[i].fds[2] = client_structs[i+1].fds[1] = -1;
+					close(client_structs[i].fds2[0]);
+					close(client_structs[i+1].fds1[1]);
+					client_structs[i].fds2[0] = client_structs[i+1].fds1[1] = -1;
 				}
 			}
 
-			if(FD_ISSET(client_structs[i].fds[1], &writeable))
+			if(FD_ISSET(client_structs[i].fds1[1], &writeable))
 			{
-				int writeret = write(client_structs[i].fds[1], client_structs[i+1].freedata, client_structs[i+1].size);
+				int writeret = write(client_structs[i].fds1[1], client_structs[i+1].freedata, client_structs[i+1].size);
 
 				if(writeret == -1)
 					err_sys("READ ERROR");
@@ -190,7 +186,7 @@ int main(int argc, char* argv[])
 	}
 	for(int i = 1; i < n; i++)
 		free(client_structs[i].data);
-		
+
 	free(client_structs);
 	exit(0);
 }
