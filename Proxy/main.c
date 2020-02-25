@@ -86,7 +86,7 @@ int main(int argc, char* argv[])
 			{
 				ret = read(in, data, BUFFSIZE);
 				if(ret < 0)
-					err_sys("READ ERROR");
+					err_sys("READ ERRORx");
 				if(write(out, data, ret) < ret)
 					err_sys("WRITE ERROR");			}
 			close(in);
@@ -148,7 +148,6 @@ int main(int argc, char* argv[])
 		if(fds == 0)
 			break;
 		int selectret = select(maxfd + 1, &readable, &writeable, NULL, NULL);
-
 		if(selectret == 0)
 			break;
 		if(selectret == -1)
@@ -160,7 +159,7 @@ int main(int argc, char* argv[])
 			{
 				int readret = read(client_structs[i].fds2[0], client_structs[i+1].data, client_structs[i+1].capacity);
 				if(readret == -1)
-					err_sys("READ ERROR");
+					err_sys("READ ERROrR");
 				client_structs[i+1].size += readret;
 				if(readret == 0)
 				{
@@ -172,10 +171,10 @@ int main(int argc, char* argv[])
 
 			if(FD_ISSET(client_structs[i].fds1[1], &writeable))
 			{
-				int writeret = write(client_structs[i].fds1[1], client_structs[i+1].freedata, client_structs[i+1].size);
-
+				printf("%d\n", client_structs[i].size);
+				int writeret = write(client_structs[i].fds1[1], client_structs[i].freedata, client_structs[i].size);
 				if(writeret == -1)
-					err_sys("READ ERROR");
+					err_sys("WRITE ERROawR");
 				if(writeret < client_structs[i].size)
 					client_structs[i].freedata += writeret;
 				else
