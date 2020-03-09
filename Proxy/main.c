@@ -1,205 +1,218 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <errno.h>
-#include <unistd.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <signal.h>
+#include <math.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/select.h>
 
-#define BUFFSIZE 27*(1 << 15)
+#define CHILDBUFSIZE 4096
+#define MAXCAPACITY  128
 
+typedef struct conn {
+    int     fds[2];
+    char*   buf;
+    int     buf_capacity;
+    int     size;
+    int     offset;
+    int     dead;
+} conn_t;
 
 void err_sys(const char* error);
-
-typedef struct client
-{
-	int fds1[2];
-	int fds2[2];
-	char* data;
-	char* freedata;
-	int capacity;
-	int size;
-
-} client;
-
+int connect(int n, conn_t* connections, int* child_fds, int first_child_read_fd);
 
 int main(int argc, char* argv[])
 {
-	int n = 1;
-	int input_fd = 0;
+    if(argc != 3)
+      err_sys("INCORRECT INPUT. USE <input path><children number>");
 
-	client* client_structs = NULL;
+    int n = atoi(argv[2]);
 
-	if(argc != 3)
-	{
-		err_sys("INCORRECT INPUT");
-	}
+    if(n < 0)
+      err_sys("INCORRECT INPUT. children number should be greater than zero");
 
-	n += atoi(argv[2]);
-	if(n == 1)
-		err_sys("INCORRECT INPUT");
-	client_structs = (client*)calloc(n, sizeof(client));
+    int input_fd = open(argv[1], O_RDONLY);
 
-	input_fd = open(argv[1], O_RDONLY);
-	/*
-	client_structs[0].fds1[0] = -1;
-	client_structs[0].fds1[1] = -1;
-	client_structs[0].fds2[0] = input_fd;
-	client_structs[0].fds2[1] = -1;
-*/
-	client_structs[n-1].fds1[0] = -1;
-	client_structs[n-1].fds1[1] =  1;
-	client_structs[n-1].fds2[0] = -1;
-	client_structs[n-1].fds2[1] = -1;
+    if(input_fd < 0)
+      err_sys("CAN'T OPEN INPUT FILE");
 
-	pipe(client_structs[0].fds2);
-	client_structs[0].fds1[0] = input_fd;
-	client_structs[0].fds1[1] = -1;
-	fcntl(client_structs[0].fds2[0], F_SETFL, O_RDONLY|O_NONBLOCK);
+    conn_t* connections = (conn_t*)calloc(n, sizeof(conn_t));
 
+    int child_fds[2] = {};
 
-	for(int i = 1; i < n-1; i++)
-	{
+    switch (connect(n, connections, child_fds, input_fd)) {
+      case 1:
+        fd_set writeable, readable;
+        while (1)
+        {
+          int maxfd = -1;
+          FD_ZERO(&writeable);
+          FD_ZERO(&readable);
 
-		pipe(client_structs[i].fds1);
-		pipe(client_structs[i].fds2);
+          for(int i = 0; i < n; i++)
+          {
+            if(connections[i].size == 0 && !connections[i].dead)
+            {
+              FD_SET(connections[i].fds[0], &readable);
 
-		fcntl(client_structs[i].fds1[1], F_SETFL, O_WRONLY|O_NONBLOCK);
-		fcntl(client_structs[i].fds2[0], F_SETFL, O_RDONLY|O_NONBLOCK);
-	}
-	for (int i = 0; i < n-1; i++)
-	{
-		if(fork() == 0)
-		{
-			for (int j = 0; j < n-1; j++)
-			{
-				if(i != j)
-				{
-					close(client_structs[j].fds1[0]);
-					close(client_structs[j].fds1[1]);
-					close(client_structs[j].fds2[0]);
-					close(client_structs[j].fds2[1]);
-				}
-				else
-				{
-					close(client_structs[j].fds1[1]);
-					close(client_structs[j].fds2[0]);
-				}
-			}
-			int in = client_structs[i].fds1[0];
-			int out  = client_structs[i].fds2[1];
-			free(client_structs);
-			char data[BUFFSIZE] = "";
-			int ret = 1;
-			while(ret)
-			{
-				ret = read(in, data, BUFFSIZE);
-				if(ret < 0)
-					err_sys("READ ERRORx");
-				if(write(out, data, ret) < ret)
-					err_sys("WRITE ERROR");			}
-			close(in);
-			close(out);
-			exit(0);
-		}
-	}
-	for(int i = 0; i < n-1; i++)
-	{
-		close(client_structs[i].fds1[0]);
-		close(client_structs[i].fds2[1]);
-	}
+              if(connections[i].fds[0] > maxfd)
+                maxfd = connections[i].fds[0];
+            }
+            if(connections[i].size != 0)
+            {
+              FD_SET(connections[i].fds[1], &writeable);
 
-	int mul = 1;
-	int maxfd = -1;
+              if(connections[i].fds[1] > maxfd)
+                maxfd = connections[i].fds[1];
+            }
+          }
+          if(maxfd < 0)
+            break;
 
-	for(int i = n-1; i > -1; i--)
-	{
-		client_structs[i].capacity = mul * 1 << 15;
-		client_structs[i].freedata = (char*)calloc(client_structs[i].capacity, sizeof(char));
-		client_structs[i].data = client_structs[i].freedata;
-		client_structs[i].size = 0;
-		if(mul <= 27)
-		{
-			mul *= 3;
-		}
-	}
+          if(!select(maxfd+1, &readable, &writeable, NULL, NULL))
+            err_sys("SELECT ERROR");
 
-	while (1)
-	{
-		fd_set readable;
-		fd_set writeable;
-		int fds = 0;
+          for(int i = 0; i < n; i++)
+          {
+            if(FD_ISSET(connections[i].fds[0], &readable))
+            {
+              int read_ret = read(connections[i].fds[0], connections[i].buf, connections[i].buf_capacity);
 
-		FD_ZERO(&readable);
-		FD_ZERO(&writeable);
+              if(read_ret < 0)
+              err_sys("READ ERRSSOR");
+              if(read_ret == 0)
+              {
+                connections[i].dead = 1;
+                connections[i].size = 0;
+                close(connections[i].fds[1]);
+              }
+              else
+                connections[i].size = read_ret;
+            }
+            if(FD_ISSET(connections[i].fds[1], &writeable))
+            {
+              int write_ret = write(connections[i].fds[1], connections[i].buf + connections[i].offset, connections[i].size);
+              if(write_ret < 0)
+                err_sys("WRITE ERwROR");
 
-		for(int i = 0; i < n; i++)
-		{
-			if(client_structs[i].fds1[1] > maxfd)
-				maxfd = client_structs[i].fds1[1];
+              connections[i].size -= write_ret;
+              if(connections[i].size == 0)
+                connections[i].offset = 0;
+              else
+                connections[i].offset += write_ret;
 
-			if(client_structs[i].fds2[0] > maxfd)
-				maxfd = client_structs[i].fds2[0];
+            }
 
-			if((client_structs[i].fds2[0] != -1) && (client_structs[i+1].size == 0))
-			{
-				FD_SET(client_structs[i].fds2[0], &readable);
-				fds++;
-			}
+          }
+        }
+        close(input_fd);
 
-			if((client_structs[i].fds1[1] != -1) && (client_structs[i].size != 0))
-			{
-				FD_SET(client_structs[i].fds1[1], &writeable);
-				fds++;
-			}
-		}
+        for(int i = 0; i < n; i++)
+          free(connections[i].buf);
+        break;
 
-		if(fds == 0)
-			break;
-		int selectret = select(maxfd + 1, &readable, &writeable, NULL, NULL);
-		if(selectret == 0)
-			break;
-		if(selectret == -1)
-			err_sys("SELECT ERROR");
+      case 0:
+        char* child_buf = (char*)calloc(CHILDBUFSIZE, sizeof(char));
+        int read_ret = 1;
 
-		for(int i = 0; i < n; i++)
-		{
-			if(FD_ISSET(client_structs[i].fds2[0], &readable))
-			{
-				int readret = read(client_structs[i].fds2[0], client_structs[i+1].data, client_structs[i+1].capacity);
-				if(readret == -1)
-					err_sys("READ ERROrR");
-				client_structs[i+1].size += readret;
-				if(readret == 0)
-				{
-					close(client_structs[i].fds2[0]);
-					close(client_structs[i+1].fds1[1]);
-					client_structs[i].fds2[0] = client_structs[i+1].fds1[1] = -1;
-				}
-			}
-
-			if(FD_ISSET(client_structs[i].fds1[1], &writeable))
-			{
-				printf("%d\n", client_structs[i].size);
-				int writeret = write(client_structs[i].fds1[1], client_structs[i].freedata, client_structs[i].size);
-				if(writeret == -1)
-					err_sys("WRITE ERROawR");
-				if(writeret < client_structs[i].size)
-					client_structs[i].freedata += writeret;
-				else
-					client_structs[i].freedata = client_structs[i].data;
-				client_structs[i].size -= writeret;
-			}
-		}
-	}
-	for(int i = 0; i < n; i++)
-		free(client_structs[i].data);
-
-	free(client_structs);
-	exit(0);
+        while(read_ret)
+        {
+          read_ret = read(child_fds[0], child_buf, CHILDBUFSIZE);
+          if(read_ret < 0)
+            err_sys("READ ERROR");
+          write(child_fds[1], child_buf, read_ret);
+        }
+        close(child_fds[0]);
+        close(child_fds[1]);
+        free(child_buf);
+        break;
+    }
+    free(connections);
+    exit(0);
 }
+
+int connect(int n, conn_t* connections, int* child_fds, int first_child_read_fd)
+{
+  int fds1[2] = {};
+  int fds2[2] = {};
+
+  if(pipe(fds1) < 0)
+    err_sys("PIPE ERROR");
+
+
+  switch (fork())
+  {
+    case -1:
+      err_sys("FORK ERROR");
+    case 0:
+      close(fds1[0]);
+      child_fds[0] = first_child_read_fd;
+      child_fds[1] = fds1[1];
+      return 0;
+
+    default:
+      close(fds1[1]);
+      connections[0].fds[0] = fds1[0];
+  }
+
+  for(int i = 0; i < n - 1; i++)
+  {
+    if(pipe(fds1) < 0)
+      err_sys("PIPE ERROR");
+    if(pipe(fds2) < 0)
+        err_sys("PIPE ERROR");
+
+    switch (fork())
+    {
+      case -1:
+        err_sys("FORK ERROR");
+      case 0:
+        close(fds1[1]);
+        close(fds2[0]);
+        child_fds[0] = fds1[0];
+        child_fds[1] = fds2[1];
+
+        for(int j = 0; j < i; j++)
+        {
+          close(connections[j].fds[0]);
+          close(connections[j].fds[1]);
+        }
+        return 0;
+
+      default:
+        close(fds1[0]);
+        close(fds2[1]);
+
+        fcntl(fds1[1], F_SETFL, O_WRONLY | O_NONBLOCK);
+        fcntl(fds2[0], F_SETFL, O_RDONLY | O_NONBLOCK);
+
+        connections[i].fds[1]   = fds1[1];
+        connections[i+1].fds[0] = fds2[0];
+    }
+  }
+  connections[n - 1].fds[1] = STDOUT_FILENO;
+
+  for(int i = 0; i < n; i++)
+  {
+      connections[i].buf_capacity = ((n - i > 4) ? MAXCAPACITY : (int)pow(3, (double)(n - i))) * 1024;
+      connections[i].size         = 0;
+      connections[i].offset       = 0;
+      connections[i].dead         = 0;
+      connections[i].buf          = (char*)calloc(connections[i].buf_capacity, sizeof(char));
+
+
+  }
+
+  return 1;
+}
+
+
+
 
 void err_sys(const char* error)
 {
